@@ -25,8 +25,8 @@ jobs:
 
     - name: Create tools symlink
       run: |
-        mkdir -p /tools
-        ln -s /usr/bin/dtc /tools/dtc
+        sudo mkdir -p /tools
+        sudo ln -s /usr/bin/dtc /tools/dtc
 
     - name: Build kernel
       run: |
