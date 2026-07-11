@@ -1,0 +1,11 @@
+make[1]: Entering directory '/home/runner/work/kernel-build/kernel-build/kernel/out'
+  GEN     /home/runner/work/kernel-build/kernel-build/kernel/out/Makefile
+scripts/kconfig/conf  --silentoldconfig Kconfig
+drivers/huawei_platform/net/himos/Kconfig:1:warning: ignoring unsupported character ''
+drivers/huawei_platform/net/himos/Kconfig:2:warning: ignoring unsupported character ''
+drivers/Kconfig:260: can't open file "drivers/oases/Kconfig"
+make[3]: *** [../scripts/kconfig/Makefile:39: silentoldconfig] Error 1
+make[2]: *** [../Makefile:615: silentoldconfig] Error 2
+make[1]: *** No rule to make target 'include/config/auto.conf', needed by 'include/config/kernel.release'.  Stop.
+make[1]: Leaving directory '/home/runner/work/kernel-build/kernel-build/kernel/out'
+make: *** [Makefile:152: sub-make] Error 2
