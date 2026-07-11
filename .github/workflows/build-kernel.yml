@@ -1,0 +1,74 @@
+name: Build Kirin 710 Kernel
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+    - name: Checkout kernel source
+      run: |
+        git clone https://github.com/dirt2022/huawei_kirin710_kernel.git kernel
+        cd kernel
+        echo "Kernel source cloned"
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y build-essential clang bc device-tree-compiler ccache libssl-dev
+        clang --version
+
+    - name: Create tools symlink
+      run: |
+        mkdir -p /tools
+        ln -s /usr/bin/dtc /tools/dtc
+
+    - name: Build kernel
+      run: |
+        cd kernel
+        chmod +x Biuld_kernel.sh
+        # Try the build script first
+        bash Biuld_kernel.sh || true
+        # If build script fails, try manual build
+        if [ ! -f arch/arm64/boot/Image ]; then
+          echo "Build script failed, trying manual build..."
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=clang
+          # Find defconfig
+          ls arch/arm64/configs/ | grep -i kirin || ls arch/arm64/configs/ | head -20
+          # Try known config
+          make ARCH=arm64 CC=clang defconfig || make ARCH=arm64 CC=clang kirin710_defconfig || true
+          make ARCH=arm64 CC=clang -j$(nproc) Image dtbs 2>&1 | tail -50
+        fi
+
+    - name: Check build result
+      run: |
+        cd kernel
+        if [ -f arch/arm64/boot/Image ]; then
+          echo "Kernel built successfully!"
+          ls -lh arch/arm64/boot/Image
+          cp arch/arm64/boot/Image ../kernel_Image
+          # Also copy dtbs if available
+          if [ -d arch/arm64/boot/dts ]; then
+            tar czf ../dtbs.tar.gz arch/arm64/boot/dts/
+          fi
+        else
+          echo "Build failed - no Image found"
+          find . -name "Image" -o -name "*.img" 2>/dev/null | head -20
+          exit 1
+        fi
+
+    - name: Upload kernel Image
+      uses: actions/upload-artifact@v4
+      with:
+        name: kirin710-kernel
+        path: |
+          kernel_Image
+          dtbs.tar.gz
+        retention-days: 30
