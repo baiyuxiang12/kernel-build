@@ -28,57 +28,78 @@ jobs:
         sudo mkdir -p /tools
         sudo ln -s /usr/bin/dtc /tools/dtc
 
-    - name: Sync KernelSU (required for build)
+    - name: Sync KernelSU
       run: |
         cd kernel
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main || true
-        # Copy custom sepolicy
         if [ -f sepolicy.c ]; then
           cp sepolicy.c KernelSU/kernel/selinux/ 2>/dev/null || true
         fi
+        echo "KernelSU sync done"
 
-    - name: Build kernel
+    - name: Configure kernel
       run: |
         cd kernel
         mkdir -p out
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
-        export GCC_COLORS=auto
-        
-        echo "=== Configuring kernel ==="
         make ARCH=arm64 O=out merge_kirin710_defconfig
-        
-        echo "=== Building kernel ==="
-        make ARCH=arm64 O=out -j$(nproc) 2>&1 | tail -100
-        
-        echo "=== Build complete ==="
-        ls -la out/arch/arm64/boot/ 2>/dev/null || echo "No boot directory"
+        echo "=== Config written ==="
 
-    - name: Check build result
+    - name: Build kernel
       run: |
         cd kernel
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        # Save full log, show errors
+        make ARCH=arm64 O=out -j$(nproc) 2>&1 | tee build.log
+        BUILD_EXIT=${PIPESTATUS[0]}
+        echo "Build exit code: $BUILD_EXIT"
+        if [ $BUILD_EXIT -ne 0 ]; then
+          echo "=== BUILD ERRORS ==="
+          grep -i "error" build.log | tail -50
+        fi
+
+    - name: Check build result
+      if: always()
+      run: |
+        cd kernel
+        echo "=== Boot directory ==="
+        ls -la out/arch/arm64/boot/ 2>/dev/null || echo "No boot directory"
+        echo "=== Find Image files ==="
+        find out -name "Image*" 2>/dev/null | head -20
+        echo "=== Last 20 lines of build log ==="
+        tail -20 build.log 2>/dev/null || echo "No build log"
         if [ -f out/arch/arm64/boot/Image ]; then
-          echo "Kernel Image built successfully!"
-          ls -lh out/arch/arm64/boot/Image
+          echo "SUCCESS: Image found!"
           cp out/arch/arm64/boot/Image ../kernel_Image
         elif [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Kernel Image.gz built (need to decompress)"
-          ls -lh out/arch/arm64/boot/Image.gz
+          echo "SUCCESS: Image.gz found!"
           cp out/arch/arm64/boot/Image.gz ../kernel_Image.gz
-          # Also try to decompress
           gunzip -c out/arch/arm64/boot/Image.gz > ../kernel_Image 2>/dev/null || true
         else
-          echo "Build failed - no Image found"
-          find out -name "Image*" 2>/dev/null | head -20
-          exit 1
+          echo "FAILED: No Image found"
+          echo "=== Errors from build ==="
+          grep -i "error\|fatal\|failed" build.log 2>/dev/null | tail -30
         fi
 
     - name: Upload kernel Image
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: kirin710-kernel
         path: |
           kernel_Image
           kernel_Image.gz
+          kernel/build.log
         retention-days: 30
+        if-no-files-found: warn
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: kernel/build.log
+        retention-days: 7
         if-no-files-found: warn
