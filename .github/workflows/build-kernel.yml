@@ -14,21 +14,12 @@ jobs:
     - name: Checkout kernel source
       run: |
         git clone --depth=1 https://github.com/dirt2022/huawei_kirin710_kernel.git kernel
-        cd kernel
-        echo "Kernel source cloned"
 
     - name: Install dependencies
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y build-essential bc device-tree-compiler ccache libssl-dev xz-utils wget
-
-    - name: Download Linaro toolchain
-      run: |
-        cd /home/runner
-        wget -q "https://releases.linaro.org/components/toolchain/binaries/4.9-2017.01/aarch64-elf/gcc-linaro-4.9.4-2017.01-x86_64_aarch64-elf.tar.xz"
-        tar xf gcc-linaro-4.9.4-2017.01-x86_64_aarch64-elf.tar.xz
-        ls gcc-linaro-4.9.4-2017.01-x86_64_aarch64-elf/bin/aarch64-elf-gcc
-        echo "Linaro toolchain installed"
+        sudo apt-get install -y build-essential clang gcc-aarch64-linux-gnu bc device-tree-compiler libssl-dev
+        clang --version
 
     - name: Create tools symlink
       run: |
@@ -42,74 +33,46 @@ jobs:
         if [ -f sepolicy.c ]; then
           cp sepolicy.c KernelSU/kernel/selinux/ 2>/dev/null || true
         fi
-        echo "KernelSU sync done"
 
     - name: Configure kernel
       run: |
         cd kernel
         mkdir -p out
-        export ARCH=arm64
-        export PATH=$PATH:/home/runner/gcc-linaro-4.9.4-2017.01-x86_64_aarch64-elf/bin
-        export CROSS_COMPILE=aarch64-elf-
-        make ARCH=arm64 O=out merge_kirin710_defconfig
-        echo "=== Config written ==="
+        make ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- O=out merge_kirin710_defconfig
 
     - name: Build kernel
       run: |
         cd kernel
-        export ARCH=arm64
-        export PATH=$PATH:/home/runner/gcc-linaro-4.9.4-2017.01-x86_64_aarch64-elf/bin
-        export CROSS_COMPILE=aarch64-elf-
-        export GCC_COLORS=auto
         set +e
-        make ARCH=arm64 O=out -j$(nproc) 2>&1 | tee build.log
-        BUILD_EXIT=${PIPESTATUS[0]}
-        echo "Build exit code: $BUILD_EXIT"
-        if [ $BUILD_EXIT -ne 0 ]; then
-          echo "=== BUILD ERRORS (first 50) ==="
-          grep -i "error:" build.log | head -50
-          echo "=== BUILD ERRORS (last 50) ==="
-          grep -i "error:" build.log | tail -50
-        fi
+        make ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- O=out -j$(nproc) 2>&1 | tee build.log
+        echo "Build exit code: ${PIPESTATUS[0]}"
+        echo "=== Errors ==="
+        grep -i "error:" build.log | head -30
+        echo "=== Warnings (last 10) ==="
+        grep -i "warning:" build.log | tail -10
 
-    - name: Check build result
+    - name: Check result
       if: always()
       run: |
         cd kernel
-        echo "=== Boot directory ==="
-        ls -la out/arch/arm64/boot/ 2>/dev/null || echo "No boot directory"
-        echo "=== Find Image files ==="
-        find out -name "Image*" 2>/dev/null | head -20
+        ls -la out/arch/arm64/boot/ 2>/dev/null || echo "No boot dir"
+        find out -name "Image*" 2>/dev/null
         if [ -f out/arch/arm64/boot/Image ]; then
-          echo "SUCCESS: Image found!"
-          ls -lh out/arch/arm64/boot/Image
           cp out/arch/arm64/boot/Image ../kernel_Image
+          echo "SUCCESS!"
         elif [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "SUCCESS: Image.gz found!"
           cp out/arch/arm64/boot/Image.gz ../kernel_Image.gz
-          gunzip -c out/arch/arm64/boot/Image.gz > ../kernel_Image 2>/dev/null || true
-        else
-          echo "FAILED: No Image found"
-          echo "=== All errors from build ==="
-          grep -i "error:" build.log 2>/dev/null | tail -30
+          echo "SUCCESS (gz)!"
         fi
 
-    - name: Upload kernel Image
+    - name: Upload artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: kirin710-kernel
+        name: kirin710-build
         path: |
           kernel_Image
           kernel_Image.gz
+          kernel/build.log
         retention-days: 30
-        if-no-files-found: warn
-
-    - name: Upload build log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-log
-        path: kernel/build.log
-        retention-days: 7
         if-no-files-found: warn
