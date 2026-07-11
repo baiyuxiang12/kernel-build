@@ -40,10 +40,21 @@ jobs:
         cd kernel
         mkdir -p out
         make ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- OBJCOPY=llvm-objcopy O=out merge_kirin710_defconfig
+        # Disable KernelSU and OASES (use Magisk instead)
+        sed -i 's/CONFIG_KSU=y/# CONFIG_KSU is not set/' out/.config
+        sed -i 's/CONFIG_OASES=y/# CONFIG_OASES is not set/' out/.config
+        # Also try removing oases from config
+        echo "# CONFIG_KSU is not set" >> out/.config
+        echo "# CONFIG_OASES is not set" >> out/.config
+        make ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- OBJCOPY=llvm-objcopy O=out olddefconfig
+        echo "=== KSU/OASES disabled ==="
+        grep -i "ksu\|oases" out/.config || echo "No KSU/OASES configs found"
 
     - name: Build kernel
       run: |
         cd kernel
+        # Remove oases directory to prevent build
+        rm -rf drivers/oases 2>/dev/null || true
         set +e
         make ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- OBJCOPY=llvm-objcopy O=out -j$(nproc) 2>&1 | tee build.log
         echo "Build exit code: ${PIPESTATUS[0]}"
