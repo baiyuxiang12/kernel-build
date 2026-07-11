@@ -13,54 +13,63 @@ jobs:
     steps:
     - name: Checkout kernel source
       run: |
-        git clone https://github.com/dirt2022/huawei_kirin710_kernel.git kernel
+        git clone --depth=1 https://github.com/dirt2022/huawei_kirin710_kernel.git kernel
         cd kernel
         echo "Kernel source cloned"
 
     - name: Install dependencies
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y build-essential clang bc device-tree-compiler ccache libssl-dev
-        clang --version
+        sudo apt-get install -y build-essential gcc-aarch64-linux-gnu bc device-tree-compiler ccache libssl-dev
+        aarch64-linux-gnu-gcc --version
 
     - name: Create tools symlink
       run: |
         sudo mkdir -p /tools
         sudo ln -s /usr/bin/dtc /tools/dtc
 
+    - name: Sync KernelSU (required for build)
+      run: |
+        cd kernel
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main || true
+        # Copy custom sepolicy
+        if [ -f sepolicy.c ]; then
+          cp sepolicy.c KernelSU/kernel/selinux/ 2>/dev/null || true
+        fi
+
     - name: Build kernel
       run: |
         cd kernel
-        chmod +x Biuld_kernel.sh
-        # Try the build script first
-        bash Biuld_kernel.sh || true
-        # If build script fails, try manual build
-        if [ ! -f arch/arm64/boot/Image ]; then
-          echo "Build script failed, trying manual build..."
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang
-          # Find defconfig
-          ls arch/arm64/configs/ | grep -i kirin || ls arch/arm64/configs/ | head -20
-          # Try known config
-          make ARCH=arm64 CC=clang defconfig || make ARCH=arm64 CC=clang kirin710_defconfig || true
-          make ARCH=arm64 CC=clang -j$(nproc) Image dtbs 2>&1 | tail -50
-        fi
+        mkdir -p out
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export GCC_COLORS=auto
+        
+        echo "=== Configuring kernel ==="
+        make ARCH=arm64 O=out merge_kirin710_defconfig
+        
+        echo "=== Building kernel ==="
+        make ARCH=arm64 O=out -j$(nproc) 2>&1 | tail -100
+        
+        echo "=== Build complete ==="
+        ls -la out/arch/arm64/boot/ 2>/dev/null || echo "No boot directory"
 
     - name: Check build result
       run: |
         cd kernel
-        if [ -f arch/arm64/boot/Image ]; then
-          echo "Kernel built successfully!"
-          ls -lh arch/arm64/boot/Image
-          cp arch/arm64/boot/Image ../kernel_Image
-          # Also copy dtbs if available
-          if [ -d arch/arm64/boot/dts ]; then
-            tar czf ../dtbs.tar.gz arch/arm64/boot/dts/
-          fi
+        if [ -f out/arch/arm64/boot/Image ]; then
+          echo "Kernel Image built successfully!"
+          ls -lh out/arch/arm64/boot/Image
+          cp out/arch/arm64/boot/Image ../kernel_Image
+        elif [ -f out/arch/arm64/boot/Image.gz ]; then
+          echo "Kernel Image.gz built (need to decompress)"
+          ls -lh out/arch/arm64/boot/Image.gz
+          cp out/arch/arm64/boot/Image.gz ../kernel_Image.gz
+          # Also try to decompress
+          gunzip -c out/arch/arm64/boot/Image.gz > ../kernel_Image 2>/dev/null || true
         else
           echo "Build failed - no Image found"
-          find . -name "Image" -o -name "*.img" 2>/dev/null | head -20
+          find out -name "Image*" 2>/dev/null | head -20
           exit 1
         fi
 
@@ -70,5 +79,6 @@ jobs:
         name: kirin710-kernel
         path: |
           kernel_Image
-          dtbs.tar.gz
+          kernel_Image.gz
         retention-days: 30
+        if-no-files-found: warn
